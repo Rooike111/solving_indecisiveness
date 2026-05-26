@@ -1,0 +1,2 @@
+# solving_indecisiveness
+这是一个为了解决选择困难症的小程序
