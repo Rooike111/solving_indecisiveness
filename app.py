@@ -22,6 +22,65 @@ def save_projects(projects: list[dict]):
     DATA_FILE.write_text(json.dumps(projects, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+class DuplicateProjectScreen(ModalScreen[str | None]):
+
+    BINDINGS = [Binding("escape", "cancel", "返回")]
+
+    DEFAULT_CSS = """
+    DuplicateProjectScreen {
+        align: center middle;
+    }
+    #dup-dialog {
+        width: 60;
+        height: auto;
+        border: thick $warning;
+        background: $surface;
+        padding: 2 3;
+    }
+    #dup-dialog .title {
+        text-align: center;
+        text-style: bold;
+        color: $warning;
+        margin-bottom: 1;
+    }
+    #dup-hint {
+        text-align: center;
+        margin-bottom: 2;
+    }
+    #dup-btn-row {
+        height: auto;
+        align: center middle;
+    }
+    #dup-btn-row Button {
+        margin: 1 1;
+    }
+    """
+
+    def __init__(self, name: str):
+        super().__init__()
+        self.project_name = name
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dup-dialog"):
+            yield Label("[ 项目名称重复 ]", classes="title")
+            yield Label(f"已存在名为「{self.project_name}」的项目", id="dup-hint")
+            with Vertical(id="dup-btn-row"):
+                yield Button("修改名称", variant="primary", id="btn-dup-rename")
+                yield Button("更新已有项目内容", variant="warning", id="btn-dup-update")
+                yield Button("取消创建", variant="default", id="btn-dup-cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-dup-rename":
+            self.dismiss("rename")
+        elif event.button.id == "btn-dup-update":
+            self.dismiss("update")
+        elif event.button.id == "btn-dup-cancel":
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class CreateProjectScreen(ModalScreen[dict | None]):
 
     BINDINGS = [Binding("escape", "cancel", "返回")]
@@ -75,16 +134,18 @@ class CreateProjectScreen(ModalScreen[dict | None]):
     }
     """
 
-    def __init__(self):
+    def __init__(self, initial_name: str = "", initial_options: list[str] | None = None):
         super().__init__()
         self.option_count = 0
+        self.initial_name = initial_name
+        self.initial_options = initial_options
 
     def compose(self) -> ComposeResult:
         with Vertical(id="create-dialog"):
             with Vertical(id="top-section"):
                 yield Label("[ 新建项目 ]", classes="title")
                 yield Label("项目名称：")
-                yield Input(placeholder="输入项目名称...", id="project-name-input")
+                yield Input(value=self.initial_name, placeholder="输入项目名称...", id="project-name-input")
                 yield Label("选项列表：")
             with VerticalScroll(id="options-area"):
                 pass
@@ -94,14 +155,18 @@ class CreateProjectScreen(ModalScreen[dict | None]):
                 yield Button("取消", variant="default", id="btn-cancel-create")
 
     def on_mount(self) -> None:
-        self._add_option_input()
-        self._add_option_input()
+        if self.initial_options:
+            for opt in self.initial_options:
+                self._add_option_input(opt)
+        else:
+            self._add_option_input()
+            self._add_option_input()
 
-    def _add_option_input(self) -> None:
+    def _add_option_input(self, value: str = "") -> None:
         self.option_count += 1
         area = self.query_one("#options-area")
         row = Horizontal(classes="option-row")
-        row.compose_add_child(Input(placeholder=f"选项 {self.option_count}...", classes="option-input"))
+        row.compose_add_child(Input(value=value, placeholder=f"选项 {self.option_count}...", classes="option-input"))
         row.compose_add_child(Button("X", variant="error", classes="btn-remove-option"))
         area.mount(row)
 
@@ -474,6 +539,123 @@ class ViewProjectScreen(ModalScreen):
         self.dismiss(None)
 
 
+class EditProjectScreen(ModalScreen[dict | None]):
+
+    BINDINGS = [Binding("escape", "cancel", "返回")]
+
+    DEFAULT_CSS = """
+    EditProjectScreen {
+        align: center middle;
+    }
+    #edit-dialog {
+        width: 70;
+        height: 80%;
+        border: thick $warning;
+        background: $surface;
+        padding: 1 2;
+    }
+    #edit-dialog .title {
+        text-align: center;
+        text-style: bold;
+        color: $warning;
+        margin-bottom: 1;
+    }
+    #edit-top-section {
+        height: auto;
+    }
+    #edit-name-input {
+        margin-bottom: 1;
+    }
+    #edit-options-area {
+        height: 1fr;
+        margin-bottom: 1;
+        scrollbar-gutter: stable;
+    }
+    .option-row {
+        height: 3;
+        margin-bottom: 0;
+    }
+    .option-row Input {
+        width: 1fr;
+    }
+    .option-row Button {
+        width: 5;
+        min-width: 5;
+    }
+    #edit-btn-row {
+        height: 3;
+        align: center middle;
+        dock: bottom;
+    }
+    #edit-btn-row Button {
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self, project: dict, project_index: int):
+        super().__init__()
+        self.project = project
+        self.project_index = project_index
+        self.option_count = 0
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="edit-dialog"):
+            with Vertical(id="edit-top-section"):
+                yield Label("[ 编辑项目 ]", classes="title")
+                yield Label("项目名称：")
+                yield Input(value=self.project["name"], id="edit-name-input")
+                yield Label("选项列表：")
+            with VerticalScroll(id="edit-options-area"):
+                pass
+            with Horizontal(id="edit-btn-row"):
+                yield Button("+ 添加选项", variant="success", id="btn-edit-add-option")
+                yield Button("保存修改", variant="warning", id="btn-edit-save")
+                yield Button("取消", variant="default", id="btn-edit-cancel")
+
+    def on_mount(self) -> None:
+        for opt in self.project["options"]:
+            self._add_option_input(opt)
+
+    def _add_option_input(self, value: str = "") -> None:
+        self.option_count += 1
+        area = self.query_one("#edit-options-area")
+        row = Horizontal(classes="option-row")
+        row.compose_add_child(Input(value=value, placeholder=f"选项 {self.option_count}...", classes="option-input"))
+        row.compose_add_child(Button("X", variant="error", classes="btn-remove-option"))
+        area.mount(row)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-edit-add-option":
+            self._add_option_input()
+        elif event.button.id == "btn-edit-save":
+            self._do_save()
+        elif event.button.id == "btn-edit-cancel":
+            self.dismiss(None)
+        elif "btn-remove-option" in (event.button.classes or set()):
+            row = event.button.parent
+            if row:
+                row.remove()
+
+    def _do_save(self) -> None:
+        name_input = self.query_one("#edit-name-input", Input)
+        name = name_input.value.strip()
+        if not name:
+            self.notify("项目名称不能为空！", severity="error")
+            return
+        options = []
+        for inp in self.query(".option-input"):
+            val = inp.value.strip()
+            if val:
+                options.append(val)
+        if len(options) < 2:
+            self.notify("至少需要 2 个选项！", severity="error")
+            return
+        self.dismiss({"name": name, "options": options, "index": self.project_index})
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class DeleteScreen(ModalScreen):
 
     BINDINGS = [Binding("escape", "cancel", "返回")]
@@ -540,25 +722,30 @@ class SolvingApp(App):
         align: center middle;
         height: 1fr;
     }
+    #menu-wrapper {
+        align: center middle;
+        height: auto;
+        width: auto;
+    }
     #title-label {
         text-align: center;
         text-style: bold;
         color: $accent;
-        margin-bottom: 2;
+        margin-bottom: 1;
     }
     #subtitle-label {
         text-align: center;
         color: $text-muted;
         margin-bottom: 2;
     }
-    #menu-buttons {
-        align: center middle;
+    #menu-columns, #menu-columns-2, #menu-columns-3 {
         height: auto;
         width: auto;
+        align: center middle;
     }
-    #menu-buttons Button {
-        width: 30;
-        margin: 1 0;
+    #menu-columns Button, #menu-columns-2 Button, #menu-columns-3 Button {
+        width: 24;
+        margin: 1 1;
     }
     #project-count {
         text-align: center;
@@ -572,6 +759,7 @@ class SolvingApp(App):
         Binding("q", "quit", "退出"),
         Binding("n", "new_project", "新建"),
         Binding("c", "choose", "选择"),
+        Binding("e", "edit", "编辑"),
     ]
 
     def __init__(self):
@@ -581,14 +769,18 @@ class SolvingApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         with Center(id="main-container"):
-            with Vertical(id="menu-buttons"):
+            with Vertical(id="menu-wrapper"):
                 yield Label("选 择 困 难 解 决 器", id="title-label")
                 yield Label("不知道选什么？让命运帮你决定！", id="subtitle-label")
-                yield Button("新建项目", variant="success", id="btn-new")
-                yield Button("帮我选择！", variant="primary", id="btn-choose")
-                yield Button("查看项目", variant="default", id="btn-list")
-                yield Button("删除项目", variant="error", id="btn-delete")
-                yield Button("退出", variant="default", id="btn-quit")
+                with Horizontal(id="menu-columns"):
+                    yield Button("新建项目", variant="success", id="btn-new")
+                    yield Button("帮我选择！", variant="primary", id="btn-choose")
+                with Horizontal(id="menu-columns-2"):
+                    yield Button("查看项目", variant="default", id="btn-list")
+                    yield Button("编辑项目", variant="warning", id="btn-edit")
+                with Horizontal(id="menu-columns-3"):
+                    yield Button("删除项目", variant="error", id="btn-delete")
+                    yield Button("退出", variant="default", id="btn-quit")
                 yield Label("", id="project-count")
         yield Footer()
 
@@ -606,6 +798,8 @@ class SolvingApp(App):
             self.action_choose()
         elif event.button.id == "btn-list":
             self._show_list()
+        elif event.button.id == "btn-edit":
+            self._show_edit()
         elif event.button.id == "btn-delete":
             self._show_delete()
         elif event.button.id == "btn-quit":
@@ -614,12 +808,41 @@ class SolvingApp(App):
     def action_new_project(self) -> None:
         self.push_screen(CreateProjectScreen(), callback=self._on_create_done)
 
+    def action_edit(self) -> None:
+        self._show_edit()
+
     def _on_create_done(self, result: dict | None) -> None:
         if result:
-            self.projects.append(result)
+            existing_idx = next(
+                (i for i, p in enumerate(self.projects) if p["name"] == result["name"]),
+                None,
+            )
+            if existing_idx is not None:
+                self._pending_create = result
+                self._pending_dup_idx = existing_idx
+                self.push_screen(
+                    DuplicateProjectScreen(result["name"]),
+                    callback=self._on_duplicate_choice,
+                )
+            else:
+                self.projects.append(result)
+                save_projects(self.projects)
+                self._update_count()
+                self.notify(f"项目「{result['name']}」创建成功！", severity="information")
+
+    def _on_duplicate_choice(self, choice: str | None) -> None:
+        if choice == "rename":
+            result = self._pending_create
+            self.push_screen(
+                CreateProjectScreen(initial_name=result["name"], initial_options=result["options"]),
+                callback=self._on_create_done,
+            )
+        elif choice == "update":
+            result = self._pending_create
+            idx = self._pending_dup_idx
+            self.projects[idx]["options"] = result["options"]
             save_projects(self.projects)
-            self._update_count()
-            self.notify(f"项目「{result['name']}」创建成功！", severity="information")
+            self.notify(f"已更新项目「{result['name']}」的内容！", severity="information")
 
     def action_choose(self) -> None:
         if not self.projects:
@@ -669,6 +892,39 @@ class SolvingApp(App):
             self.notify("没有可删除的项目。", severity="warning")
             return
         self.push_screen(DeleteScreen(self.projects), callback=self._on_delete_done)
+
+    def _show_edit(self) -> None:
+        if not self.projects:
+            self.notify("还没有项目，请先新建一个！", severity="warning")
+            return
+        self.push_screen(ChooseScreen(self.projects), callback=self._on_edit_select)
+
+    def _on_edit_select(self, idx: int | None) -> None:
+        if idx is not None and 0 <= idx < len(self.projects):
+            self.push_screen(
+                EditProjectScreen(self.projects[idx], idx),
+                callback=self._on_edit_done,
+            )
+
+    def _on_edit_done(self, result: dict | None) -> None:
+        if result:
+            idx = result["index"]
+            new_name = result["name"]
+            existing_idx = next(
+                (i for i, p in enumerate(self.projects) if p["name"] == new_name and i != idx),
+                None,
+            )
+            if existing_idx is not None:
+                self.notify(f"已存在名为「{new_name}」的项目，请使用其他名称！", severity="error")
+                self.push_screen(
+                    EditProjectScreen({"name": new_name, "options": result["options"]}, idx),
+                    callback=self._on_edit_done,
+                )
+                return
+            self.projects[idx] = {"name": new_name, "options": result["options"]}
+            save_projects(self.projects)
+            self._update_count()
+            self.notify(f"项目「{new_name}」已更新！", severity="information")
 
     def _on_delete_done(self, idx: int | None) -> None:
         if idx is not None and 0 <= idx < len(self.projects):
