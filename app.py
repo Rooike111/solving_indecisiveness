@@ -7,6 +7,7 @@ from textual.containers import Center, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Header, Input, Label, ListItem, ListView, Static
 from textual.binding import Binding
+from textual.timer import Timer
 
 DATA_FILE = Path(__file__).parent / "projects.json"
 
@@ -136,6 +137,151 @@ class CreateProjectScreen(ModalScreen[dict | None]):
         self.dismiss(None)
 
 
+class SpinWheelScreen(ModalScreen):
+
+    BINDINGS = [Binding("escape", "skip", "跳过")]
+
+    DEFAULT_CSS = """
+    SpinWheelScreen {
+        align: center middle;
+    }
+    #spin-dialog {
+        width: 60;
+        height: auto;
+        border: heavy $warning;
+        background: $surface;
+        padding: 2 3;
+    }
+    #spin-title {
+        text-align: center;
+        text-style: bold;
+        color: $warning;
+        margin-bottom: 1;
+        width: 100%;
+    }
+    #spin-hint {
+        text-align: center;
+        color: $text-muted;
+        margin-bottom: 1;
+        width: 100%;
+    }
+    #wheel-container {
+        height: auto;
+        width: 100%;
+        margin: 1 0;
+    }
+    .wheel-slot {
+        text-align: center;
+        width: 100%;
+        height: 1;
+        color: $text-muted;
+    }
+    .wheel-slot-active {
+        text-align: center;
+        width: 100%;
+        height: 1;
+        text-style: bold;
+        color: $accent;
+        background: $accent 20%;
+    }
+    .wheel-slot-final {
+        text-align: center;
+        width: 100%;
+        height: 1;
+        text-style: bold;
+        color: $success;
+        background: $success 20%;
+    }
+    #spin-pointer {
+        text-align: center;
+        width: 100%;
+        color: $warning;
+        text-style: bold;
+    }
+    """
+
+    def __init__(self, project_name: str, options: list[str], final_result: str):
+        super().__init__()
+        self.project_name = project_name
+        self.options = options
+        self.final_result = final_result
+        self.current_index = 0
+        self.spin_timer: Timer | None = None
+        self.step_count = 0
+        self.total_steps = 0
+        self.speed = 0.05
+        self.finished = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="spin-dialog"):
+            yield Label(f"-- {self.project_name} --", id="spin-title")
+            yield Label("命运转盘旋转中...", id="spin-hint")
+            yield Static("", id="spin-pointer")
+            with Vertical(id="wheel-container"):
+                for i, opt in enumerate(self.options):
+                    yield Label(f"  {opt}  ", classes="wheel-slot", id=f"slot-{i}")
+            yield Static("", id="spin-pointer-bottom")
+
+    def on_mount(self) -> None:
+        self.total_steps = len(self.options) * 3 + self.options.index(self.final_result)
+        self.current_index = 0
+        self._update_wheel()
+        self.spin_timer = self.set_interval(self.speed, self._spin_tick)
+
+    def _spin_tick(self) -> None:
+        self.step_count += 1
+        self.current_index = (self.current_index + 1) % len(self.options)
+        self._update_wheel()
+
+        if self.step_count >= self.total_steps:
+            if self.spin_timer:
+                self.spin_timer.stop()
+            self.finished = True
+            self._show_final()
+            return
+
+        progress = self.step_count / self.total_steps
+        if progress > 0.5:
+            new_speed = 0.05 + (progress - 0.5) * 0.9
+            if self.spin_timer:
+                self.spin_timer.stop()
+            self.spin_timer = self.set_interval(new_speed, self._spin_tick)
+
+    def _update_wheel(self) -> None:
+        for i in range(len(self.options)):
+            slot = self.query_one(f"#slot-{i}", Label)
+            slot.remove_class("wheel-slot-active", "wheel-slot-final")
+            slot.add_class("wheel-slot")
+            if i == self.current_index:
+                slot.remove_class("wheel-slot")
+                slot.add_class("wheel-slot-active")
+                slot.update(f">>> {self.options[i]} <<<")
+            else:
+                slot.update(f"    {self.options[i]}    ")
+
+    def _show_final(self) -> None:
+        hint = self.query_one("#spin-hint", Label)
+        hint.update("命运已经决定！")
+        for i in range(len(self.options)):
+            slot = self.query_one(f"#slot-{i}", Label)
+            slot.remove_class("wheel-slot-active", "wheel-slot")
+            if i == self.current_index:
+                slot.add_class("wheel-slot-final")
+                slot.update(f">>> {self.options[i]} <<<")
+            else:
+                slot.add_class("wheel-slot")
+                slot.update(f"    {self.options[i]}    ")
+        self.set_timer(1.5, self._dismiss_with_result)
+
+    def _dismiss_with_result(self) -> None:
+        self.dismiss(self.final_result)
+
+    def action_skip(self) -> None:
+        if self.spin_timer:
+            self.spin_timer.stop()
+        self.dismiss(self.final_result)
+
+
 class ResultScreen(ModalScreen):
 
     BINDINGS = [Binding("escape", "close", "关闭"), Binding("space", "close", "关闭")]
@@ -156,6 +302,11 @@ class ResultScreen(ModalScreen):
         text-style: bold;
         color: $warning;
         margin-bottom: 1;
+        width: 100%;
+    }
+    #result-label {
+        text-align: center;
+        width: 100%;
     }
     #result-value {
         text-align: center;
@@ -164,11 +315,14 @@ class ResultScreen(ModalScreen):
         padding: 1 2;
         border: round $success;
         margin: 1 2;
+        width: 100%;
     }
     #result-hint {
         text-align: center;
         color: $text-muted;
         margin-top: 1;
+        margin-bottom: 2;
+        width: 100%;
     }
     #btn-close-result {
         margin-top: 1;
@@ -183,7 +337,7 @@ class ResultScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical(id="result-dialog"):
             yield Label(f"-- {self.project_name} --", id="result-title")
-            yield Label("命运之选：", classes="")
+            yield Label("命运之选：", id="result-label")
             yield Label(self.result, id="result-value")
             yield Label("就这样决定了，不要再犹豫！", id="result-hint")
             with Center():
@@ -222,11 +376,17 @@ class ChooseScreen(ModalScreen):
         text-style: bold;
         color: $accent;
         margin-bottom: 1;
+        width: 100%;
     }
     #project-list {
         height: auto;
         max-height: 20;
         margin: 1 0;
+        width: 100%;
+    }
+    #project-list ListItem Label {
+        text-align: center;
+        width: 100%;
     }
     """
 
@@ -254,6 +414,63 @@ class ChooseScreen(ModalScreen):
             self.dismiss(None)
 
     def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class ViewProjectScreen(ModalScreen):
+
+    BINDINGS = [Binding("escape", "close", "返回")]
+
+    DEFAULT_CSS = """
+    ViewProjectScreen {
+        align: center middle;
+    }
+    #view-dialog {
+        width: 60;
+        height: auto;
+        max-height: 80%;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #view-dialog .title {
+        text-align: center;
+        text-style: bold;
+        color: $accent;
+        margin-bottom: 1;
+        width: 100%;
+    }
+    #view-options {
+        height: auto;
+        max-height: 20;
+        margin: 1 2;
+    }
+    .option-label {
+        text-align: center;
+        width: 100%;
+        padding: 0 1;
+    }
+    """
+
+    def __init__(self, project: dict):
+        super().__init__()
+        self.project = project
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="view-dialog"):
+            yield Label(f"[ {self.project['name']} ]", classes="title")
+            yield Label(f"共 {len(self.project['options'])} 个选项：", classes="option-label")
+            with VerticalScroll(id="view-options"):
+                for i, opt in enumerate(self.project["options"], 1):
+                    yield Label(f"  {i}. {opt}", classes="option-label")
+            with Center():
+                yield Button("返回", variant="default", id="btn-close-view")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-close-view":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
         self.dismiss(None)
 
 
@@ -420,7 +637,18 @@ class SolvingApp(App):
     def _do_choose(self, idx: int) -> None:
         project = self.projects[idx]
         result = random.choice(project["options"])
-        self.push_screen(ResultScreen(project["name"], result), callback=lambda r: self._on_result_closed(r, idx))
+        self.push_screen(
+            SpinWheelScreen(project["name"], project["options"], result),
+            callback=lambda r: self._on_spin_done(r, idx),
+        )
+
+    def _on_spin_done(self, result: str | None, idx: int) -> None:
+        if result:
+            project = self.projects[idx]
+            self.push_screen(
+                ResultScreen(project["name"], result),
+                callback=lambda r: self._on_result_closed(r, idx),
+            )
 
     def _on_result_closed(self, action, idx: int) -> None:
         if action == "reroll":
@@ -430,7 +658,11 @@ class SolvingApp(App):
         if not self.projects:
             self.notify("还没有项目，请先新建一个！", severity="warning")
             return
-        self.push_screen(ChooseScreen(self.projects), callback=lambda _: None)
+        self.push_screen(ChooseScreen(self.projects), callback=self._on_view_project)
+
+    def _on_view_project(self, idx: int | None) -> None:
+        if idx is not None and 0 <= idx < len(self.projects):
+            self.push_screen(ViewProjectScreen(self.projects[idx]), callback=lambda _: self._show_list())
 
     def _show_delete(self) -> None:
         if not self.projects:
